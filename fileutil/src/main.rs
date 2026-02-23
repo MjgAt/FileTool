@@ -24,6 +24,7 @@ enum OutputFormat {
 #[derive(Subcommand, Debug)]
 enum Commands {
     Ls(commands::ls::LsArgs),
+    Enum(commands::r#enum::EnumArgs),
     // Add more built-in subcommands here
     // For external subcommands, add variants here and dispatch accordingly
 }
@@ -32,6 +33,7 @@ fn main() {
     let cli = Cli::parse();
     let data = match cli.command {
         Commands::Ls(args) => commands::ls::run(args),
+        Commands::Enum(args) => commands::r#enum::run(args),
         // Handle other built-ins
         // For external subcommands, add cases like: Commands::Custom => handle_external("custom", serde_json::to_string(args).unwrap())
     };

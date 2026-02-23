@@ -18,6 +18,8 @@ cargo run --bin fileutil -- [options] <subcommand> [args]
 
 - `ls [path]`: List directory contents (default path: current directory)
   - `-r, --recursive`: Recurse into subdirectories
+- `enum [paths...]`: Enumerate files with detailed metadata (default path: current directory)
+  - `--follow-links`: Follow symbolic links and junctions
 
 ## Output Formats
 
