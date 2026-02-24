@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "tables": {
+    "enum": {
+      "columns": [
+        {
+          "name": "root",
+          "type": "string"
+        },
+        {
+          "name": "rel_path",
+          "type": "string"
+        },
+        {
+          "name": "filename",
+          "type": "string"
+        },
+        {
+          "name": "parent_id",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "size",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "nullable": true
+        },
+        {
+          "name": "modified_at",
+          "type": "datetime",
+          "nullable": true
+        }
+      ]
+    },
+    "ls": {
+      "columns": [
+        {
+          "name": "is_dir",
+          "type": "boolean"
+        },
+        {
+          "name": "path",
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "type": "integer",
+          "nullable": true
+        }
+      ]
+    }
+  }
+}

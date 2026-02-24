@@ -1,0 +1,17 @@
+[package]
+name = "fswalk"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform filesystem walking abstraction with Win32-rich metadata"
+
+[dependencies]
+walkdir = "2.0"
+globwalk = "0.9"
+globset  = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.52", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_Security",
+] }

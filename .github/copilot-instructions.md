@@ -109,3 +109,278 @@ When moving the section to DESIGN-NOTES-AGED-OUT.md, include the date of the mov
 
 A work item is done when all the text is complete, the build passes with clean builds,
 release and debug, and the tests pass, for unit tests, benchmarks, and integration tests.
+
+# csvdb JSON Schema Format
+
+A `.csvdb.json` file maps CSV file name stems to typed column layouts so that
+`csvdb` can parse, query, and validate them.  Place the file in the same
+directory as your CSV files (or any ancestor directory).
+
+---
+
+## Top-level structure
+
+```json
+{
+  "version": "1.0",
+  "sources": { ... },
+  "layouts": { ... }
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `version` | yes | Always `"1.0"` |
+| `layouts` | yes | Named layout definitions (see below) |
+| `sources` | no | Maps filename stems to layouts; inferred from layout names when absent |
+
+---
+
+## `sources`
+
+Each key is a filename stem (no extension) or a glob pattern; each value is a
+layout name string (shorthand) or a full object:
+
+```json
+"sources": {
+  "q1_sales":  "sales",
+  "q2_sales":  "sales",
+  "archive_*": "sales",
+  "special": { "layout": "sales" }
+}
+```
+
+- Keys are matched in insertion order; **first match wins**.
+- Glob matching is case-insensitive on Windows, case-sensitive on Unix.
+- When `sources` is absent, a CSV file whose stem exactly equals a layout name
+  is bound to that layout automatically.
+
+---
+
+## `layouts`
+
+Each entry describes the structure of one class of CSV file.
+
+### Simple layout
+
+```json
+"sales": {
+  "format": "simple",
+  "header": "present",
+  "columns": {
+    "id":         "Integer",
+    "amount":     "Decimal",
+    "sale_date":  { "type": "DateTime", "format": "iso8601" },
+    "notes":      { "type": "String", "description": "Optional" }
+  }
+}
+```
+
+| Field | Default | Values |
+|---|---|---|
+| `format` | — | `"simple"` or `"tagged"` (required) |
+| `header` | `"present"` | `"present"` · `"absent"` · `"ignore"` |
+| `delimiter` | `","` | Any single character |
+| `null_markers` | `[""]` | Array of strings treated as NULL |
+| `encoding` | `"utf8"` | `"utf8"` · `"utf16"` · `"ascii"` · `"latin1"` |
+
+### Column types
+
+Columns are declared as a shorthand type string or a full object:
+
+```json
+"id":        "Integer",
+"amount":    { "type": "Decimal", "description": "Sale total" }
+```
+
+| Type | Description |
+|---|---|
+| `"Integer"` | 64-bit signed integer |
+| `"Float"` | 64-bit IEEE 754 double |
+| `"Decimal"` | Arbitrary-precision decimal |
+| `"String"` | Unicode text (whitespace-trimmed by default) |
+| `"DateTime"` | Date/time value |
+| `"Boolean"` | `true`/`false` |
+| `"Guid"` | RFC 4122 UUID |
+| `"General"` | Untyped; stored as-is |
+
+**Column properties (full form)**
+
+| Property | Default | Description |
+|---|---|---|
+| `type` | — | Type name from the table above (required) |
+| `description` | — | Documentation string |
+| `trim_csv` | `true` | Strip leading/trailing whitespace from raw cell |
+| `format` | automatic | Type-specific parse/format hint (see below) |
+| `default` | — | Value emitted for NULL/missing cells |
+
+**`format` hints by type**
+
+- `DateTime`: `"iso8601"` · `"rfc3339"` · `"custom:%Y-%m-%d %H:%M:%S"` · `"automatic"` (default — tries common ISO variants)
+- `Boolean`: `"true_false"` · `"1_0"` · `"yes_no"` · `"custom:Y|N"` · `"automatic"` (default)
+- `Float`: `"automatic"` (default, Excel General rules) · `"ryu"` · `"hex"` · `"scientific"`
+- `Decimal`: `{ "radix_point": "," }` for locales that use `,` as the decimal separator
+
+---
+
+### Tagged layout
+
+A tagged layout is a single CSV file where the **first column** selects the
+schema for that row.  Each distinct tag value corresponds to a separate simple
+child layout.
+
+```json
+"xperf": {
+  "format": "tagged",
+  "header": "absent",
+  "tag_column": 0,
+  "tag_column_name": "record_type",
+  "tag_match": "case_insensitive",
+  "tags": [
+    { "name": "DPC",       "value": "DPC",       "layout": "xperf_dpc" },
+    { "name": "Interrupt", "value": "Interrupt",  "layout": "xperf_interrupt" },
+    { "name": "T_Start",   "value": "T-Start",    "layout": "xperf_thread" },
+    { "name": "T_End",     "value": "T-End",      "layout": "xperf_thread" }
+  ]
+}
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `tag_column` | `0` | Zero-based index of the tag column (currently must be 0) |
+| `tag_column_name` | `"record_type"` | Name of the tag column in query results |
+| `tag_match` | `"case_sensitive"` | `"case_sensitive"` or `"case_insensitive"` |
+| `tags` | — | Array of tag entries (see below) |
+
+**Tag entry fields**
+
+| Field | Description |
+|---|---|
+| `name` | Logical name used in queries (`source.DPC`) |
+| `value` | Raw string that appears in the CSV file's tag column (whitespace is trimmed before comparison) |
+| `layout` | Name of the simple child layout to apply; must exist in `layouts` |
+
+Multiple tag entries may share the same `layout` (e.g. `T-Start` and `T-End`
+both map to `xperf_thread`).
+
+Child layouts for tagged files use `"header": "absent"` and define only the
+**data columns** — the tag column is not listed and is never included in the
+child layout's `columns`.
+
+The query-visible schema is the union of all child layouts' columns with the
+tag column prepended.  Columns absent from a given record type emit
+`Value::DbNull` for that record type's rows.
+
+**Querying tagged slices**  
+To read only one record type, use dot notation:
+
+```
+source.DPC | take 10
+```
+
+This emits only DPC rows and drops the tag column from output, exposing the
+exact columns defined in the `DPC` child layout.
+
+---
+
+## Complete example — simple layouts
+
+```json
+{
+  "version": "1.0",
+  "sources": {
+    "sales_2024_*": "sales",
+    "customers":    "customers"
+  },
+  "layouts": {
+    "sales": {
+      "format": "simple",
+      "header": "present",
+      "columns": {
+        "order_id":   "Integer",
+        "customer_id":"Integer",
+        "product":    "String",
+        "quantity":   { "type": "Integer", "constraints": { "min": 1 } },
+        "total":      "Decimal",
+        "ordered_at": { "type": "DateTime", "format": "iso8601" },
+        "shipped":    { "type": "Boolean",  "format": "1_0", "default": false }
+      }
+    },
+    "customers": {
+      "format": "simple",
+      "header": "present",
+      "columns": {
+        "customer_id": "Integer",
+        "email":       "String",
+        "country":     { "type": "String", "default": "US" }
+      }
+    }
+  }
+}
+```
+
+## Complete example — tagged layout (xperf style)
+
+```json
+{
+  "version": "1.0",
+  "sources": {
+    "my_trace": "xperf"
+  },
+  "layouts": {
+    "xperf": {
+      "format": "tagged",
+      "header": "absent",
+      "tag_column": 0,
+      "tag_column_name": "record_type",
+      "tag_match": "case_insensitive",
+      "tags": [
+        { "name": "DPC",       "value": "DPC",       "layout": "xperf_dpc" },
+        { "name": "Interrupt", "value": "Interrupt",  "layout": "xperf_interrupt" }
+      ]
+    },
+    "xperf_dpc": {
+      "format": "simple",
+      "header": "absent",
+      "columns": {
+        "timestamp":     "Integer",
+        "elapsed_time":  "Integer",
+        "cpu":           "Integer",
+        "service_addr":  "General",
+        "image_function":"String"
+      }
+    },
+    "xperf_interrupt": {
+      "format": "simple",
+      "header": "absent",
+      "columns": {
+        "timestamp":     "Integer",
+        "elapsed_time":  "Integer",
+        "cpu":           "Integer",
+        "vector":        "Integer",
+        "service_addr":  "General",
+        "image_function":"String"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Rules for Copilot when writing schemas
+
+- Always set `"version": "1.0"`.
+- Use `"General"` for hex addresses, opaque identifiers, and fields that should
+  pass through unparsed.
+- Use `"Integer"` for timestamps, counts, and IDs — not `"Float"`.
+- Use `"Decimal"` for money/financial values, never `"Float"`.
+- For tagged layouts: child layouts must use `"header": "absent"` and must **not**
+  include the tag column in their `columns`.
+- Tag `"value"` is the literal string in the CSV; the executor trims surrounding
+  whitespace before matching, so do not include padding in the value.
+- Prefer `"tag_match": "case_insensitive"` for tool-generated CSV where tag
+  casing may vary across versions.
+- Layout names must match `[a-zA-Z][a-zA-Z0-9_]*`.
+- Source names (keys in `sources`) may be plain stems or glob patterns; use
+  `*` to cover multiple files sharing a layout.
